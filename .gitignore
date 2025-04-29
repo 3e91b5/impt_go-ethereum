@@ -26,6 +26,9 @@ build/_vendor/pkg
 /build/_workspace/
 /build/cache/
 /build/bin/geth
+/build/bin/full*
+/build/bin/init*
+/build/bin/remakeGeth.sh
 
 /geth*.zip
 
