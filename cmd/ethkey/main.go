@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ethereum/go-ethereum/internal/flags"
-	"github.com/urfave/cli/v2"
+	"github.com/ethereum/go-ethereum/cmd/utils"
+	"gopkg.in/urfave/cli.v1"
 )
 
 const (
@@ -35,8 +35,8 @@ var gitDate = ""
 var app *cli.App
 
 func init() {
-	app = flags.NewApp(gitCommit, gitDate, "an Ethereum key manager")
-	app.Commands = []*cli.Command{
+	app = utils.NewApp(gitCommit, gitDate, "an Ethereum key manager")
+	app.Commands = []cli.Command{
 		commandGenerate,
 		commandInspect,
 		commandChangePassphrase,
@@ -47,11 +47,11 @@ func init() {
 
 // Commonly used command line flags.
 var (
-	passphraseFlag = &cli.StringFlag{
+	passphraseFlag = cli.StringFlag{
 		Name:  "passwordfile",
-		Usage: "the file that contains the password for the keyfile",
+		Usage: "the file that contains the passphrase for the keyfile",
 	}
-	jsonFlag = &cli.BoolFlag{
+	jsonFlag = cli.BoolFlag{
 		Name:  "json",
 		Usage: "output JSON instead of human-readable format",
 	}

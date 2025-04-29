@@ -1,4 +1,4 @@
-// Copyright 2016 The go-ethereum Authors
+// Copyright 2018 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -55,12 +55,13 @@ var (
 // ClientManager controls the capacity assigned to the clients of a server.
 // Since ServerParams guarantee a safe lower estimate for processable requests
 // even in case of all clients being active, ClientManager calculates a
-// corrugated buffer value and usually allows a higher remaining buffer value
+// corrigated buffer value and usually allows a higher remaining buffer value
 // to be returned with each reply.
 type ClientManager struct {
-	clock mclock.Clock
-	lock  sync.Mutex
-	stop  chan chan struct{}
+	clock     mclock.Clock
+	lock      sync.Mutex
+	enabledCh chan struct{}
+	stop      chan chan struct{}
 
 	curve                                      PieceWiseLinear
 	sumRecharge, totalRecharge, totalConnected uint64
@@ -107,7 +108,7 @@ type ClientManager struct {
 func NewClientManager(curve PieceWiseLinear, clock mclock.Clock) *ClientManager {
 	cm := &ClientManager{
 		clock:         clock,
-		rcQueue:       prque.NewWrapAround(func(a interface{}, i int) { a.(*ClientNode).queueIndex = i }),
+		rcQueue:       prque.New(func(a interface{}, i int) { a.(*ClientNode).queueIndex = i }),
 		capLastUpdate: clock.Now(),
 		stop:          make(chan chan struct{}),
 	}

@@ -17,41 +17,46 @@
 package jsre
 
 import (
+	"io/ioutil"
 	"os"
 	"path"
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/dop251/goja"
+	"github.com/robertkrimen/otto"
 )
 
-type testNativeObjectBinding struct {
-	vm *goja.Runtime
-}
+type testNativeObjectBinding struct{}
 
 type msg struct {
 	Msg string
 }
 
-func (no *testNativeObjectBinding) TestMethod(call goja.FunctionCall) goja.Value {
-	m := call.Argument(0).ToString().String()
-	return no.vm.ToValue(&msg{m})
+func (no *testNativeObjectBinding) TestMethod(call otto.FunctionCall) otto.Value {
+	m, err := call.Argument(0).ToString()
+	if err != nil {
+		return otto.UndefinedValue()
+	}
+	v, _ := call.Otto.ToValue(&msg{m})
+	return v
 }
 
-func newWithTestJS(t *testing.T, testjs string) *JSRE {
-	dir := t.TempDir()
+func newWithTestJS(t *testing.T, testjs string) (*JSRE, string) {
+	dir, err := ioutil.TempDir("", "jsre-test")
+	if err != nil {
+		t.Fatal("cannot create temporary directory:", err)
+	}
 	if testjs != "" {
-		if err := os.WriteFile(path.Join(dir, "test.js"), []byte(testjs), os.ModePerm); err != nil {
+		if err := ioutil.WriteFile(path.Join(dir, "test.js"), []byte(testjs), os.ModePerm); err != nil {
 			t.Fatal("cannot create test.js:", err)
 		}
 	}
-	jsre := New(dir, os.Stdout)
-	return jsre
+	return New(dir, os.Stdout), dir
 }
 
 func TestExec(t *testing.T) {
-	jsre := newWithTestJS(t, `msg = "testMsg"`)
+	jsre, dir := newWithTestJS(t, `msg = "testMsg"`)
+	defer os.RemoveAll(dir)
 
 	err := jsre.Exec("test.js")
 	if err != nil {
@@ -61,11 +66,11 @@ func TestExec(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
-	if val.ExportType().Kind() != reflect.String {
+	if !val.IsString() {
 		t.Errorf("expected string value, got %v", val)
 	}
 	exp := "testMsg"
-	got := val.ToString().String()
+	got, _ := val.ToString()
 	if exp != got {
 		t.Errorf("expected '%v', got '%v'", exp, got)
 	}
@@ -73,24 +78,25 @@ func TestExec(t *testing.T) {
 }
 
 func TestNatto(t *testing.T) {
-	jsre := newWithTestJS(t, `setTimeout(function(){msg = "testMsg"}, 1);`)
+	jsre, dir := newWithTestJS(t, `setTimeout(function(){msg = "testMsg"}, 1);`)
+	defer os.RemoveAll(dir)
 
 	err := jsre.Exec("test.js")
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		t.Errorf("expected no error, got %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
 	val, err := jsre.Run("msg")
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		t.Errorf("expected no error, got %v", err)
 	}
-	if val.ExportType().Kind() != reflect.String {
-		t.Fatalf("expected string value, got %v", val)
+	if !val.IsString() {
+		t.Errorf("expected string value, got %v", val)
 	}
 	exp := "testMsg"
-	got := val.ToString().String()
+	got, _ := val.ToString()
 	if exp != got {
-		t.Fatalf("expected '%v', got '%v'", exp, got)
+		t.Errorf("expected '%v', got '%v'", exp, got)
 	}
 	jsre.Stop(false)
 }
@@ -99,7 +105,7 @@ func TestBind(t *testing.T) {
 	jsre := New("", os.Stdout)
 	defer jsre.Stop(false)
 
-	jsre.Set("no", &testNativeObjectBinding{vm: jsre.vm})
+	jsre.Bind("no", &testNativeObjectBinding{})
 
 	_, err := jsre.Run(`no.TestMethod("testMsg")`)
 	if err != nil {
@@ -108,7 +114,8 @@ func TestBind(t *testing.T) {
 }
 
 func TestLoadScript(t *testing.T) {
-	jsre := newWithTestJS(t, `msg = "testMsg"`)
+	jsre, dir := newWithTestJS(t, `msg = "testMsg"`)
+	defer os.RemoveAll(dir)
 
 	_, err := jsre.Run(`loadScript("test.js")`)
 	if err != nil {
@@ -118,11 +125,11 @@ func TestLoadScript(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
-	if val.ExportType().Kind() != reflect.String {
+	if !val.IsString() {
 		t.Errorf("expected string value, got %v", val)
 	}
 	exp := "testMsg"
-	got := val.ToString().String()
+	got, _ := val.ToString()
 	if exp != got {
 		t.Errorf("expected '%v', got '%v'", exp, got)
 	}

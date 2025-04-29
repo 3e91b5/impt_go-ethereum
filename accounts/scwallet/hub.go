@@ -34,7 +34,7 @@ package scwallet
 
 import (
 	"encoding/json"
-	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -96,7 +96,7 @@ func (hub *Hub) readPairings() error {
 		return err
 	}
 
-	pairingData, err := io.ReadAll(pairingFile)
+	pairingData, err := ioutil.ReadAll(pairingFile)
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func (hub *Hub) refreshWallets() {
 		// Mark the reader as present
 		seen[reader] = struct{}{}
 
-		// If we already know about this card, skip to the next reader, otherwise clean up
+		// If we alreay know about this card, skip to the next reader, otherwise clean up
 		if wallet, ok := hub.wallets[reader]; ok {
 			if err := wallet.ping(); err == nil {
 				continue

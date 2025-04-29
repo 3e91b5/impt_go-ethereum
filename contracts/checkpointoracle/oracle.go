@@ -1,4 +1,4 @@
-// Copyright 2019 The go-ethereum Authors
+// Copyright 2018 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -17,8 +17,7 @@
 // Package checkpointoracle is a an on-chain light client checkpoint oracle.
 package checkpointoracle
 
-//go:generate solc contract/oracle.sol --combined-json bin,bin-runtime,srcmap,srcmap-runtime,abi,userdoc,devdoc,metadata,hashes --optimize -o ./ --overwrite
-//go:generate go run ../../cmd/abigen --pkg contract --out contract/oracle.go --combined-json ./combined.json
+//go:generate abigen --sol contract/oracle.sol --pkg contract --out contract/oracle.go
 
 import (
 	"errors"
@@ -30,9 +29,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// CheckpointOracle is a Go wrapper around an on-chain checkpoint oracle contract.
+// CheckpointOracle is a Go wrapper around an on-chain light client checkpoint oracle.
 type CheckpointOracle struct {
-	address  common.Address
 	contract *contract.CheckpointOracle
 }
 
@@ -42,12 +40,7 @@ func NewCheckpointOracle(contractAddr common.Address, backend bind.ContractBacke
 	if err != nil {
 		return nil, err
 	}
-	return &CheckpointOracle{address: contractAddr, contract: c}, nil
-}
-
-// ContractAddr returns the address of contract.
-func (oracle *CheckpointOracle) ContractAddr() common.Address {
-	return oracle.address
+	return &CheckpointOracle{contract: c}, nil
 }
 
 // Contract returns the underlying contract instance.
@@ -66,7 +59,7 @@ func (oracle *CheckpointOracle) LookupCheckpointEvents(blockLogs [][]*types.Log,
 			if err != nil {
 				continue
 			}
-			if event.Index == section && event.CheckpointHash == hash {
+			if event.Index == section && common.Hash(event.CheckpointHash) == hash {
 				votes = append(votes, event)
 			}
 		}

@@ -17,38 +17,38 @@
 package les
 
 import (
-	"errors"
-
+	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 )
 
 type ulc struct {
-	keys     map[string]bool
-	fraction int
+	trustedKeys        map[string]struct{}
+	minTrustedFraction int
 }
 
-// newULC creates and returns an ultra light client instance.
-func newULC(servers []string, fraction int) (*ulc, error) {
-	keys := make(map[string]bool)
-	for _, id := range servers {
+// newULC creates and returns a ultra light client instance.
+func newULC(ulcConfig *eth.ULCConfig) *ulc {
+	if ulcConfig == nil {
+		return nil
+	}
+	m := make(map[string]struct{}, len(ulcConfig.TrustedServers))
+	for _, id := range ulcConfig.TrustedServers {
 		node, err := enode.Parse(enode.ValidSchemes, id)
 		if err != nil {
-			log.Warn("Failed to parse trusted server", "id", id, "err", err)
+			log.Debug("Failed to parse trusted server", "id", id, "err", err)
 			continue
 		}
-		keys[node.ID().String()] = true
+		m[node.ID().String()] = struct{}{}
 	}
-	if len(keys) == 0 {
-		return nil, errors.New("no trusted servers")
-	}
-	return &ulc{
-		keys:     keys,
-		fraction: fraction,
-	}, nil
+	return &ulc{m, ulcConfig.MinTrustedFraction}
 }
 
-// trusted return an indicator that whether the specified peer is trusted.
-func (u *ulc) trusted(p enode.ID) bool {
-	return u.keys[p.String()]
+// isTrusted return an indicator that whether the specified peer is trusted.
+func (u *ulc) isTrusted(p enode.ID) bool {
+	if u.trustedKeys == nil {
+		return false
+	}
+	_, ok := u.trustedKeys[p.String()]
+	return ok
 }

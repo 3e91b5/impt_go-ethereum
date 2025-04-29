@@ -1,18 +1,19 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// This file is part of go-ethereum.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// go-ethereum is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// go-ethereum is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License
+// along with go-ethereum. If not, see <http://www.gnu.org/licenses/>.
+//
 
 package storage
 
@@ -41,7 +42,8 @@ type Storage interface {
 // EphemeralStorage is an in-memory storage that does
 // not persist values to disk. Mainly used for testing
 type EphemeralStorage struct {
-	data map[string]string
+	data      map[string]string
+	namespace string
 }
 
 // Put stores a value by key. 0-length keys results in noop.
@@ -82,5 +84,5 @@ type NoStorage struct{}
 func (s *NoStorage) Put(key, value string) {}
 func (s *NoStorage) Del(key string)        {}
 func (s *NoStorage) Get(key string) (string, error) {
-	return "", errors.New("missing key, I probably forgot")
+	return "", errors.New("I forgot")
 }

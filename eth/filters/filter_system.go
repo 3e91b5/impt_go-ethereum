@@ -20,96 +20,20 @@ package filters
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/bloombits"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
-	lru "github.com/hashicorp/golang-lru"
 )
-
-// Config represents the configuration of the filter system.
-type Config struct {
-	LogCacheSize int           // maximum number of cached blocks (default: 32)
-	Timeout      time.Duration // how long filters stay active (default: 5min)
-}
-
-func (cfg Config) withDefaults() Config {
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 5 * time.Minute
-	}
-	if cfg.LogCacheSize == 0 {
-		cfg.LogCacheSize = 32
-	}
-	return cfg
-}
-
-type Backend interface {
-	ChainDb() ethdb.Database
-	HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error)
-	HeaderByHash(ctx context.Context, blockHash common.Hash) (*types.Header, error)
-	GetReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, error)
-	GetLogs(ctx context.Context, blockHash common.Hash, number uint64) ([][]*types.Log, error)
-	PendingBlockAndReceipts() (*types.Block, types.Receipts)
-
-	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
-	SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription
-	SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription
-	SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription
-	SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription
-
-	BloomStatus() (uint64, uint64)
-	ServiceFilter(ctx context.Context, session *bloombits.MatcherSession)
-}
-
-// FilterSystem holds resources shared by all filters.
-type FilterSystem struct {
-	backend   Backend
-	logsCache *lru.Cache
-	cfg       *Config
-}
-
-// NewFilterSystem creates a filter system.
-func NewFilterSystem(backend Backend, config Config) *FilterSystem {
-	config = config.withDefaults()
-
-	cache, err := lru.New(config.LogCacheSize)
-	if err != nil {
-		panic(err)
-	}
-	return &FilterSystem{
-		backend:   backend,
-		logsCache: cache,
-		cfg:       &config,
-	}
-}
-
-// cachedGetLogs loads block logs from the backend and caches the result.
-func (sys *FilterSystem) cachedGetLogs(ctx context.Context, blockHash common.Hash, number uint64) ([][]*types.Log, error) {
-	cached, ok := sys.logsCache.Get(blockHash)
-	if ok {
-		return cached.([][]*types.Log), nil
-	}
-
-	logs, err := sys.backend.GetLogs(ctx, blockHash, number)
-	if err != nil {
-		return nil, err
-	}
-	if logs == nil {
-		return nil, fmt.Errorf("failed to get logs for block #%d (0x%s)", number, blockHash.TerminalString())
-	}
-	sys.logsCache.Add(blockHash, logs)
-	return logs, nil
-}
 
 // Type determines the kind of filter and is used to put the filter in to
 // the correct bucket when added.
@@ -134,6 +58,7 @@ const (
 )
 
 const (
+
 	// txChanSize is the size of channel listening to NewTxsEvent.
 	// The number is referenced from the size of tx pool.
 	txChanSize = 4096
@@ -143,6 +68,10 @@ const (
 	logsChanSize = 10
 	// chainEvChanSize is the size of channel listening to ChainEvent.
 	chainEvChanSize = 10
+)
+
+var (
+	ErrInvalidSubscriptionID = errors.New("invalid id")
 )
 
 type subscription struct {
@@ -160,26 +89,25 @@ type subscription struct {
 // EventSystem creates subscriptions, processes events and broadcasts them to the
 // subscription which match the subscription criteria.
 type EventSystem struct {
+	mux       *event.TypeMux
 	backend   Backend
-	sys       *FilterSystem
 	lightMode bool
 	lastHead  *types.Header
 
 	// Subscriptions
-	txsSub         event.Subscription // Subscription for new transaction event
-	logsSub        event.Subscription // Subscription for new log event
-	rmLogsSub      event.Subscription // Subscription for removed log event
-	pendingLogsSub event.Subscription // Subscription for pending log event
-	chainSub       event.Subscription // Subscription for new chain event
+	txsSub        event.Subscription         // Subscription for new transaction event
+	logsSub       event.Subscription         // Subscription for new log event
+	rmLogsSub     event.Subscription         // Subscription for removed log event
+	chainSub      event.Subscription         // Subscription for new chain event
+	pendingLogSub *event.TypeMuxSubscription // Subscription for pending log event
 
 	// Channels
-	install       chan *subscription         // install filter for event notification
-	uninstall     chan *subscription         // remove filter for event notification
-	txsCh         chan core.NewTxsEvent      // Channel to receive new transactions event
-	logsCh        chan []*types.Log          // Channel to receive new log event
-	pendingLogsCh chan []*types.Log          // Channel to receive new log event
-	rmLogsCh      chan core.RemovedLogsEvent // Channel to receive removed log event
-	chainCh       chan core.ChainEvent       // Channel to receive new chain event
+	install   chan *subscription         // install filter for event notification
+	uninstall chan *subscription         // remove filter for event notification
+	txsCh     chan core.NewTxsEvent      // Channel to receive new transactions event
+	logsCh    chan []*types.Log          // Channel to receive new log event
+	rmLogsCh  chan core.RemovedLogsEvent // Channel to receive removed log event
+	chainCh   chan core.ChainEvent       // Channel to receive new chain event
 }
 
 // NewEventSystem creates a new manager that listens for event on the given mux,
@@ -188,18 +116,17 @@ type EventSystem struct {
 //
 // The returned manager has a loop that needs to be stopped with the Stop function
 // or by stopping the given mux.
-func NewEventSystem(sys *FilterSystem, lightMode bool) *EventSystem {
+func NewEventSystem(mux *event.TypeMux, backend Backend, lightMode bool) *EventSystem {
 	m := &EventSystem{
-		sys:           sys,
-		backend:       sys.backend,
-		lightMode:     lightMode,
-		install:       make(chan *subscription),
-		uninstall:     make(chan *subscription),
-		txsCh:         make(chan core.NewTxsEvent, txChanSize),
-		logsCh:        make(chan []*types.Log, logsChanSize),
-		rmLogsCh:      make(chan core.RemovedLogsEvent, rmLogsChanSize),
-		pendingLogsCh: make(chan []*types.Log, logsChanSize),
-		chainCh:       make(chan core.ChainEvent, chainEvChanSize),
+		mux:       mux,
+		backend:   backend,
+		lightMode: lightMode,
+		install:   make(chan *subscription),
+		uninstall: make(chan *subscription),
+		txsCh:     make(chan core.NewTxsEvent, txChanSize),
+		logsCh:    make(chan []*types.Log, logsChanSize),
+		rmLogsCh:  make(chan core.RemovedLogsEvent, rmLogsChanSize),
+		chainCh:   make(chan core.ChainEvent, chainEvChanSize),
 	}
 
 	// Subscribe events
@@ -207,10 +134,12 @@ func NewEventSystem(sys *FilterSystem, lightMode bool) *EventSystem {
 	m.logsSub = m.backend.SubscribeLogsEvent(m.logsCh)
 	m.rmLogsSub = m.backend.SubscribeRemovedLogsEvent(m.rmLogsCh)
 	m.chainSub = m.backend.SubscribeChainEvent(m.chainCh)
-	m.pendingLogsSub = m.backend.SubscribePendingLogsEvent(m.pendingLogsCh)
+	// TODO(rjl493456442): use feed to subscribe pending log event
+	m.pendingLogSub = m.mux.Subscribe(core.PendingLogsEvent{})
 
 	// Make sure none of the subscriptions are empty
-	if m.txsSub == nil || m.logsSub == nil || m.rmLogsSub == nil || m.chainSub == nil || m.pendingLogsSub == nil {
+	if m.txsSub == nil || m.logsSub == nil || m.rmLogsSub == nil || m.chainSub == nil ||
+		m.pendingLogSub.Closed() {
 		log.Crit("Subscribe for event system failed")
 	}
 
@@ -336,7 +265,7 @@ func (es *EventSystem) subscribeLogs(crit ethereum.FilterQuery, logs chan []*typ
 	return es.subscribe(sub)
 }
 
-// subscribePendingLogs creates a subscription that writes contract event logs for
+// subscribePendingLogs creates a subscription that writes transaction hashes for
 // transactions that enter the transaction pool.
 func (es *EventSystem) subscribePendingLogs(crit ethereum.FilterQuery, logs chan []*types.Log) *Subscription {
 	sub := &subscription{
@@ -387,61 +316,58 @@ func (es *EventSystem) SubscribePendingTxs(hashes chan []common.Hash) *Subscript
 
 type filterIndex map[Type]map[rpc.ID]*subscription
 
-func (es *EventSystem) handleLogs(filters filterIndex, ev []*types.Log) {
-	if len(ev) == 0 {
+// broadcast event to filters that match criteria.
+func (es *EventSystem) broadcast(filters filterIndex, ev interface{}) {
+	if ev == nil {
 		return
 	}
-	for _, f := range filters[LogsSubscription] {
-		matchedLogs := filterLogs(ev, f.logsCrit.FromBlock, f.logsCrit.ToBlock, f.logsCrit.Addresses, f.logsCrit.Topics)
-		if len(matchedLogs) > 0 {
-			f.logs <- matchedLogs
-		}
-	}
-}
 
-func (es *EventSystem) handlePendingLogs(filters filterIndex, ev []*types.Log) {
-	if len(ev) == 0 {
-		return
-	}
-	for _, f := range filters[PendingLogsSubscription] {
-		matchedLogs := filterLogs(ev, nil, f.logsCrit.ToBlock, f.logsCrit.Addresses, f.logsCrit.Topics)
-		if len(matchedLogs) > 0 {
-			f.logs <- matchedLogs
-		}
-	}
-}
-
-func (es *EventSystem) handleRemovedLogs(filters filterIndex, ev core.RemovedLogsEvent) {
-	for _, f := range filters[LogsSubscription] {
-		matchedLogs := filterLogs(ev.Logs, f.logsCrit.FromBlock, f.logsCrit.ToBlock, f.logsCrit.Addresses, f.logsCrit.Topics)
-		if len(matchedLogs) > 0 {
-			f.logs <- matchedLogs
-		}
-	}
-}
-
-func (es *EventSystem) handleTxsEvent(filters filterIndex, ev core.NewTxsEvent) {
-	hashes := make([]common.Hash, 0, len(ev.Txs))
-	for _, tx := range ev.Txs {
-		hashes = append(hashes, tx.Hash())
-	}
-	for _, f := range filters[PendingTransactionsSubscription] {
-		f.hashes <- hashes
-	}
-}
-
-func (es *EventSystem) handleChainEvent(filters filterIndex, ev core.ChainEvent) {
-	for _, f := range filters[BlocksSubscription] {
-		f.headers <- ev.Block.Header()
-	}
-	if es.lightMode && len(filters[LogsSubscription]) > 0 {
-		es.lightFilterNewHead(ev.Block.Header(), func(header *types.Header, remove bool) {
+	switch e := ev.(type) {
+	case []*types.Log:
+		if len(e) > 0 {
 			for _, f := range filters[LogsSubscription] {
-				if matchedLogs := es.lightFilterLogs(header, f.logsCrit.Addresses, f.logsCrit.Topics, remove); len(matchedLogs) > 0 {
+				if matchedLogs := filterLogs(e, f.logsCrit.FromBlock, f.logsCrit.ToBlock, f.logsCrit.Addresses, f.logsCrit.Topics); len(matchedLogs) > 0 {
 					f.logs <- matchedLogs
 				}
 			}
-		})
+		}
+	case core.RemovedLogsEvent:
+		for _, f := range filters[LogsSubscription] {
+			if matchedLogs := filterLogs(e.Logs, f.logsCrit.FromBlock, f.logsCrit.ToBlock, f.logsCrit.Addresses, f.logsCrit.Topics); len(matchedLogs) > 0 {
+				f.logs <- matchedLogs
+			}
+		}
+	case *event.TypeMuxEvent:
+		if muxe, ok := e.Data.(core.PendingLogsEvent); ok {
+			for _, f := range filters[PendingLogsSubscription] {
+				if e.Time.After(f.created) {
+					if matchedLogs := filterLogs(muxe.Logs, nil, f.logsCrit.ToBlock, f.logsCrit.Addresses, f.logsCrit.Topics); len(matchedLogs) > 0 {
+						f.logs <- matchedLogs
+					}
+				}
+			}
+		}
+	case core.NewTxsEvent:
+		hashes := make([]common.Hash, 0, len(e.Txs))
+		for _, tx := range e.Txs {
+			hashes = append(hashes, tx.Hash())
+		}
+		for _, f := range filters[PendingTransactionsSubscription] {
+			f.hashes <- hashes
+		}
+	case core.ChainEvent:
+		for _, f := range filters[BlocksSubscription] {
+			f.headers <- e.Block.Header()
+		}
+		if es.lightMode && len(filters[LogsSubscription]) > 0 {
+			es.lightFilterNewHead(e.Block.Header(), func(header *types.Header, remove bool) {
+				for _, f := range filters[LogsSubscription] {
+					if matchedLogs := es.lightFilterLogs(header, f.logsCrit.Addresses, f.logsCrit.Topics, remove); len(matchedLogs) > 0 {
+						f.logs <- matchedLogs
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -484,7 +410,7 @@ func (es *EventSystem) lightFilterLogs(header *types.Header, addresses []common.
 		// Get the logs of the block
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancel()
-		logsList, err := es.sys.cachedGetLogs(ctx, header.Hash(), header.Number.Uint64())
+		logsList, err := es.backend.GetLogs(ctx, header.Hash())
 		if err != nil {
 			return nil
 		}
@@ -522,10 +448,10 @@ func (es *EventSystem) lightFilterLogs(header *types.Header, addresses []common.
 func (es *EventSystem) eventLoop() {
 	// Ensure all subscriptions get cleaned up
 	defer func() {
+		es.pendingLogSub.Unsubscribe()
 		es.txsSub.Unsubscribe()
 		es.logsSub.Unsubscribe()
 		es.rmLogsSub.Unsubscribe()
-		es.pendingLogsSub.Unsubscribe()
 		es.chainSub.Unsubscribe()
 	}()
 
@@ -536,16 +462,20 @@ func (es *EventSystem) eventLoop() {
 
 	for {
 		select {
+		// Handle subscribed events
 		case ev := <-es.txsCh:
-			es.handleTxsEvent(index, ev)
+			es.broadcast(index, ev)
 		case ev := <-es.logsCh:
-			es.handleLogs(index, ev)
+			es.broadcast(index, ev)
 		case ev := <-es.rmLogsCh:
-			es.handleRemovedLogs(index, ev)
-		case ev := <-es.pendingLogsCh:
-			es.handlePendingLogs(index, ev)
+			es.broadcast(index, ev)
 		case ev := <-es.chainCh:
-			es.handleChainEvent(index, ev)
+			es.broadcast(index, ev)
+		case ev, active := <-es.pendingLogSub.Chan():
+			if !active { // system stopped
+				return
+			}
+			es.broadcast(index, ev)
 
 		case f := <-es.install:
 			if f.typ == MinedAndPendingLogsSubscription {

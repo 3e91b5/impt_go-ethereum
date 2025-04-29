@@ -1,18 +1,18 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// This file is part of go-ethereum.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// go-ethereum is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// go-ethereum is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License
+// along with go-ethereum. If not, see <http://www.gnu.org/licenses/>.
 
 package rules
 
@@ -22,23 +22,27 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
-	"github.com/ethereum/go-ethereum/internal/jsre/deps"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/signer/core"
+	"github.com/ethereum/go-ethereum/signer/rules/deps"
 	"github.com/ethereum/go-ethereum/signer/storage"
+	"github.com/robertkrimen/otto"
+)
+
+var (
+	BigNumber_JS = deps.MustAsset("bignumber.js")
 )
 
 // consoleOutput is an override for the console.log and console.error methods to
 // stream the output into the configured output stream instead of stdout.
-func consoleOutput(call goja.FunctionCall) goja.Value {
+func consoleOutput(call otto.FunctionCall) otto.Value {
 	output := []string{"JS:> "}
-	for _, argument := range call.Arguments {
+	for _, argument := range call.ArgumentList {
 		output = append(output, fmt.Sprintf("%v", argument))
 	}
 	fmt.Fprintln(os.Stderr, strings.Join(output, " "))
-	return goja.Undefined()
+	return otto.Value{}
 }
 
 // rulesetUI provides an implementation of UIClientAPI that evaluates a javascript
@@ -59,7 +63,6 @@ func NewRuleEvaluator(next core.UIClientAPI, jsbackend storage.Storage) (*rulese
 	return c, nil
 }
 func (r *rulesetUI) RegisterUIServer(api *core.UIServerAPI) {
-	r.next.RegisterUIServer(api)
 	// TODO, make it possible to query from js
 }
 
@@ -67,46 +70,45 @@ func (r *rulesetUI) Init(javascriptRules string) error {
 	r.jsRules = javascriptRules
 	return nil
 }
-func (r *rulesetUI) execute(jsfunc string, jsarg interface{}) (goja.Value, error) {
+func (r *rulesetUI) execute(jsfunc string, jsarg interface{}) (otto.Value, error) {
+
 	// Instantiate a fresh vm engine every time
-	vm := goja.New()
+	vm := otto.New()
 
 	// Set the native callbacks
-	consoleObj := vm.NewObject()
-	consoleObj.Set("log", consoleOutput)
-	consoleObj.Set("error", consoleOutput)
-	vm.Set("console", consoleObj)
+	consoleObj, _ := vm.Get("console")
+	consoleObj.Object().Set("log", consoleOutput)
+	consoleObj.Object().Set("error", consoleOutput)
 
-	storageObj := vm.NewObject()
-	storageObj.Set("put", func(call goja.FunctionCall) goja.Value {
+	vm.Set("storage", struct{}{})
+	storageObj, _ := vm.Get("storage")
+	storageObj.Object().Set("put", func(call otto.FunctionCall) otto.Value {
 		key, val := call.Argument(0).String(), call.Argument(1).String()
 		if val == "" {
 			r.storage.Del(key)
 		} else {
 			r.storage.Put(key, val)
 		}
-		return goja.Null()
+		return otto.NullValue()
 	})
-	storageObj.Set("get", func(call goja.FunctionCall) goja.Value {
+	storageObj.Object().Set("get", func(call otto.FunctionCall) otto.Value {
 		goval, _ := r.storage.Get(call.Argument(0).String())
-		jsval := vm.ToValue(goval)
+		jsval, _ := otto.ToValue(goval)
 		return jsval
 	})
-	vm.Set("storage", storageObj)
-
 	// Load bootstrap libraries
-	script, err := goja.Compile("bignumber.js", deps.BigNumberJS, true)
+	script, err := vm.Compile("bignumber.js", BigNumber_JS)
 	if err != nil {
 		log.Warn("Failed loading libraries", "err", err)
-		return goja.Undefined(), err
+		return otto.UndefinedValue(), err
 	}
-	vm.RunProgram(script)
+	vm.Run(script)
 
 	// Run the actual rule implementation
-	_, err = vm.RunString(r.jsRules)
+	_, err = vm.Run(r.jsRules)
 	if err != nil {
 		log.Warn("Execution failed", "err", err)
-		return goja.Undefined(), err
+		return otto.UndefinedValue(), err
 	}
 
 	// And the actual call
@@ -117,7 +119,7 @@ func (r *rulesetUI) execute(jsfunc string, jsarg interface{}) (goja.Value, error
 	jsonbytes, err := json.Marshal(jsarg)
 	if err != nil {
 		log.Warn("failed marshalling data", "data", jsarg)
-		return goja.Undefined(), err
+		return otto.UndefinedValue(), err
 	}
 	// Now, we call foobar(JSON.parse(<jsondata>)).
 	var call string
@@ -126,7 +128,7 @@ func (r *rulesetUI) execute(jsfunc string, jsarg interface{}) (goja.Value, error
 	} else {
 		call = fmt.Sprintf("%v()", jsfunc)
 	}
-	return vm.RunString(call)
+	return vm.Run(call)
 }
 
 func (r *rulesetUI) checkApproval(jsfunc string, jsarg []byte, err error) (bool, error) {
@@ -138,7 +140,11 @@ func (r *rulesetUI) checkApproval(jsfunc string, jsarg []byte, err error) (bool,
 		log.Info("error occurred during execution", "error", err)
 		return false, err
 	}
-	result := v.ToString().String()
+	result, err := v.ToString()
+	if err != nil {
+		log.Info("error occurred during response unmarshalling", "error", err)
+		return false, err
+	}
 	if result == "Approve" {
 		log.Info("Op approved")
 		return true, nil
@@ -146,7 +152,7 @@ func (r *rulesetUI) checkApproval(jsfunc string, jsarg []byte, err error) (bool,
 		log.Info("Op rejected")
 		return false, nil
 	}
-	return false, fmt.Errorf("unknown response")
+	return false, fmt.Errorf("Unknown response")
 }
 
 func (r *rulesetUI) ApproveTx(request *core.SignTxRequest) (core.SignTxResponse, error) {

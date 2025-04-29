@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -38,7 +37,6 @@ var (
 
 // Environment contains metadata provided by the build environment.
 type Environment struct {
-	CI                        bool
 	Name                      string // name of the environment
 	Repo                      string // name of GitHub repo
 	Commit, Date, Branch, Tag string // Git info
@@ -62,7 +60,6 @@ func Env() Environment {
 			commit = os.Getenv("TRAVIS_COMMIT")
 		}
 		return Environment{
-			CI:            true,
 			Name:          "travis",
 			Repo:          os.Getenv("TRAVIS_REPO_SLUG"),
 			Commit:        commit,
@@ -79,7 +76,6 @@ func Env() Environment {
 			commit = os.Getenv("APPVEYOR_REPO_COMMIT")
 		}
 		return Environment{
-			CI:            true,
 			Name:          "appveyor",
 			Repo:          os.Getenv("APPVEYOR_REPO_NAME"),
 			Commit:        commit,
@@ -103,13 +99,6 @@ func LocalEnv() Environment {
 	if fields := strings.Fields(head); len(fields) == 2 {
 		head = fields[1]
 	} else {
-		// In this case we are in "detached head" state
-		// see: https://git-scm.com/docs/git-checkout#_detached_head
-		// Additional check required to verify, that file contains commit hash
-		commitRe, _ := regexp.Compile("^([0-9a-f]{40})$")
-		if commit := commitRe.FindString(head); commit != "" && env.Commit == "" {
-			env.Commit = commit
-		}
 		return env
 	}
 	if env.Commit == "" {

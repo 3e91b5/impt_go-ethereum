@@ -36,6 +36,21 @@ func NewEthereumClient(rawurl string) (client *EthereumClient, _ error) {
 	return &EthereumClient{rawClient}, err
 }
 
+func (ec *EthereumClient) GetTrieSizeByHash(ctx context.Context, hash common.Hash) (uint64, error) {
+	return ec.client.TrieSizeByHash(ctx.context, hash.hash)
+}
+
+func (ec *EthereumClient) GetTrieSizeByNumber(ctx context.Context, number int64) (uint64, error) {
+	return ec.client.TrieSizeByNumber(ctx.context, big.NewInt(number))
+}
+
+func (ec *EthereumClient) GetMiningTimeByHash(ctx context.Context, hash common.Hash, threads int) (uint64, error) {
+	return ec.client.MiningTimeByHash(ctx.context, hash.hash, threads)
+}
+
+func (ec *EthereumClient) GetMiningTimeByNumber(ctx context.Context, number int64, threads int) (uint64, error) {
+	return ec.client.MiningTimeByNumber(ctx.context, big.NewInt(number), threads)
+}
 // GetBlockByHash returns the given full block.
 func (ec *EthereumClient) GetBlockByHash(ctx *Context, hash *Hash) (block *Block, _ error) {
 	rawBlock, err := ec.client.BlockByHash(ctx.context, hash.hash)
@@ -94,6 +109,7 @@ func (ec *EthereumClient) GetTransactionCount(ctx *Context, hash *Hash) (count i
 func (ec *EthereumClient) GetTransactionInBlock(ctx *Context, hash *Hash, index int) (tx *Transaction, _ error) {
 	rawTx, err := ec.client.TransactionInBlock(ctx.context, hash.hash, uint(index))
 	return &Transaction{rawTx}, err
+
 }
 
 // GetTransactionReceipt returns the receipt of a transaction by transaction hash.

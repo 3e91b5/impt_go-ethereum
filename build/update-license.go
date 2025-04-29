@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build none
 // +build none
 
 /*
@@ -40,6 +39,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -62,24 +62,16 @@ var (
 	skipPrefixes = []string{
 		// boring stuff
 		"vendor/", "tests/testdata/", "build/",
-
 		// don't relicense vendored sources
 		"cmd/internal/browser",
-		"common/bitutil/bitutil",
-		"common/prque/",
 		"consensus/ethash/xor.go",
-		"crypto/blake2b/",
 		"crypto/bn256/",
-		"crypto/bls12381/",
 		"crypto/ecies/",
-		"graphql/graphiql.go",
+		"crypto/secp256k1/curve.go",
+		"crypto/sha3/",
 		"internal/jsre/deps",
 		"log/",
-		"metrics/",
-		"signer/rules/deps",
-
-		// skip special licenses
-		"crypto/secp256k1", // Relicensed to BSD-3 via https://github.com/ethereum/go-ethereum/pull/17225
+		"common/bitutil/bitutil",
 	}
 
 	// paths with this prefix are licensed as GPL. all other files are LGPL.
@@ -151,13 +143,6 @@ func (i info) gpl() bool {
 	}
 	return false
 }
-
-// authors implements the sort.Interface for strings in case-insensitive mode.
-type authors []string
-
-func (as authors) Len() int           { return len(as) }
-func (as authors) Less(i, j int) bool { return strings.ToLower(as[i]) < strings.ToLower(as[j]) }
-func (as authors) Swap(i, j int)      { as[i], as[j] = as[j], as[i] }
 
 func main() {
 	var (
@@ -243,7 +228,7 @@ func gitAuthors(files []string) []string {
 }
 
 func readAuthors() []string {
-	content, err := os.ReadFile("AUTHORS")
+	content, err := ioutil.ReadFile("AUTHORS")
 	if err != nil && !os.IsNotExist(err) {
 		log.Fatalln("error reading AUTHORS:", err)
 	}
@@ -277,37 +262,32 @@ func mailmapLookup(authors []string) []string {
 }
 
 func writeAuthors(files []string) {
-	var (
-		dedup = make(map[string]bool)
-		list  []string
-	)
-	// Add authors that Git reports as contributors.
+	merge := make(map[string]bool)
+	// Add authors that Git reports as contributorxs.
 	// This is the primary source of author information.
 	for _, a := range gitAuthors(files) {
-		if la := strings.ToLower(a); !dedup[la] {
-			list = append(list, a)
-			dedup[la] = true
-		}
+		merge[a] = true
 	}
 	// Add existing authors from the file. This should ensure that we
 	// never lose authors, even if Git stops listing them. We can also
 	// add authors manually this way.
 	for _, a := range readAuthors() {
-		if la := strings.ToLower(a); !dedup[la] {
-			list = append(list, a)
-			dedup[la] = true
-		}
+		merge[a] = true
 	}
 	// Write sorted list of authors back to the file.
-	sort.Sort(authors(list))
+	var result []string
+	for a := range merge {
+		result = append(result, a)
+	}
+	sort.Strings(result)
 	content := new(bytes.Buffer)
 	content.WriteString(authorsFileHeader)
-	for _, a := range list {
+	for _, a := range result {
 		content.WriteString(a)
 		content.WriteString("\n")
 	}
 	fmt.Println("writing AUTHORS")
-	if err := os.WriteFile("AUTHORS", content.Bytes(), 0644); err != nil {
+	if err := ioutil.WriteFile("AUTHORS", content.Bytes(), 0644); err != nil {
 		log.Fatalln(err)
 	}
 }
@@ -383,7 +363,7 @@ func writeLicense(info *info) {
 	if err != nil {
 		log.Fatalf("error stat'ing %s: %v\n", info.file, err)
 	}
-	content, err := os.ReadFile(info.file)
+	content, err := ioutil.ReadFile(info.file)
 	if err != nil {
 		log.Fatalf("error reading %s: %v\n", info.file, err)
 	}
@@ -402,7 +382,7 @@ func writeLicense(info *info) {
 		return
 	}
 	fmt.Println("writing", info.ShortLicense(), info.file)
-	if err := os.WriteFile(info.file, buf.Bytes(), fi.Mode()); err != nil {
+	if err := ioutil.WriteFile(info.file, buf.Bytes(), fi.Mode()); err != nil {
 		log.Fatalf("error writing %s: %v", info.file, err)
 	}
 }

@@ -51,33 +51,27 @@ func hexToCompact(hex []byte) []byte {
 	return buf
 }
 
-// hexToCompactInPlace places the compact key in input buffer, returning the length
-// needed for the representation
-func hexToCompactInPlace(hex []byte) int {
-	var (
-		hexLen    = len(hex) // length of the hex input
-		firstByte = byte(0)
-	)
-	// Check if we have a terminator there
-	if hexLen > 0 && hex[hexLen-1] == 16 {
-		firstByte = 1 << 5
-		hexLen-- // last part was the terminator, ignore that
+// hexToHashPrefix returns the hash prefix we want to find (sjkim)
+func hexToHashPrefix (hex []byte) []byte {
+	
+	terminator := byte(0)
+	if hasTerm(hex) {
+		terminator = 1
+		//hex = hex[:len(hex)-1]
+		hex = hex[:1] // fast mining for leaf node 
 	}
-	var (
-		binLen = hexLen/2 + 1
-		ni     = 0 // index in hex
-		bi     = 1 // index in bin (compact)
-	)
-	if hexLen&1 == 1 {
-		firstByte |= 1 << 4 // odd flag
-		firstByte |= hex[0] // first nibble is contained in the first byte
-		ni++
+	if len(hex) > 3 { hex = hex[:3]; } // restrict hex size to 3
+	buf := make([]byte, len(hex)/2+1)
+	buf[0] = terminator << 7 // the flag byte; extension node has 1 to 7, leaf node has 8 to f
+	buf[0] |= byte(len(hex)) << 4
+	if len(hex)&1 == 1 {
+		buf[0] |= hex[0] // first nibble is contained in the first byte
+		hex = hex[1:]
 	}
-	for ; ni < hexLen; bi, ni = bi+1, ni+2 {
-		hex[bi] = hex[ni]<<4 | hex[ni+1]
-	}
-	hex[0] = firstByte
-	return binLen
+	decodeNibbles(hex, buf[1:])
+	
+	//buf := []byte{}
+	return buf
 }
 
 func compactToHex(compact []byte) []byte {
@@ -143,3 +137,37 @@ func prefixLen(a, b []byte) int {
 func hasTerm(s []byte) bool {
 	return len(s) > 0 && s[len(s)-1] == 16
 }
+
+// compactToHashPrefix returns the hash prefix we want to find (sjkim)
+func compactToHashPrefix (compact []byte) []byte {
+	//return nil // do not mining (sjkim)
+	fixedLength := 2
+	terminator := byte(0)
+	if compact[0] >> 5 == 1 {
+	   terminator = byte(1)
+	   //compact = compact[:len(compact)-1] // fast mining for leaf node 
+	}
+	if compact[0] & byte(0x10) == 0x10 {
+	   length := len(compact)
+	   if length > 4 { length = 4; }
+	   if len(compact) > fixedLength { compact = compact[:fixedLength]; }
+	   buf := make([]byte, fixedLength)
+	   copy(buf, compact)
+	   buf[0] &= byte(0x0f)
+	   buf[0] |= byte(2*length-1) << 4
+	   buf[0] |= terminator << 7
+	   return buf
+	} else if compact[0] & byte(0x10) == 0x00 {
+	   length := len(compact)
+	   if length > 4 { length = 4; }
+	   if len(compact) > fixedLength { compact = compact[:fixedLength]; }
+	   buf := make([]byte, fixedLength)
+	   copy(buf, compact)
+	   buf[0] &= byte(0x0f)
+	   buf[0] |= byte(2*length-2) << 4
+	   buf[0] |= terminator << 7
+	   return buf
+	} else {
+	   panic("compactToHashPresix error")
+	}
+ }

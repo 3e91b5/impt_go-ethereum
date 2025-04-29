@@ -21,7 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net"
 	"os"
 	"strconv"
@@ -30,39 +30,37 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/urfave/cli/v2"
+	"gopkg.in/urfave/cli.v1"
 )
 
-var fileFlag = &cli.StringFlag{Name: "file"}
-
-var enrdumpCommand = &cli.Command{
+var enrdumpCommand = cli.Command{
 	Name:   "enrdump",
 	Usage:  "Pretty-prints node records",
 	Action: enrdump,
 	Flags: []cli.Flag{
-		fileFlag,
+		cli.StringFlag{Name: "file"},
 	},
 }
 
 func enrdump(ctx *cli.Context) error {
 	var source string
-	if file := ctx.String(fileFlag.Name); file != "" {
+	if file := ctx.String("file"); file != "" {
 		if ctx.NArg() != 0 {
 			return fmt.Errorf("can't dump record from command-line argument in -file mode")
 		}
 		var b []byte
 		var err error
 		if file == "-" {
-			b, err = io.ReadAll(os.Stdin)
+			b, err = ioutil.ReadAll(os.Stdin)
 		} else {
-			b, err = os.ReadFile(file)
+			b, err = ioutil.ReadFile(file)
 		}
 		if err != nil {
 			return err
 		}
 		source = string(b)
 	} else if ctx.NArg() == 1 {
-		source = ctx.Args().First()
+		source = ctx.Args()[0]
 	} else {
 		return fmt.Errorf("need record as argument")
 	}
@@ -71,30 +69,22 @@ func enrdump(ctx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("INVALID: %v", err)
 	}
-	dumpRecord(os.Stdout, r)
+	fmt.Print(dumpRecord(r))
 	return nil
 }
 
 // dumpRecord creates a human-readable description of the given node record.
-func dumpRecord(out io.Writer, r *enr.Record) {
-	n, err := enode.New(enode.ValidSchemes, r)
-	if err != nil {
+func dumpRecord(r *enr.Record) string {
+	out := new(bytes.Buffer)
+	if n, err := enode.New(enode.ValidSchemes, r); err != nil {
 		fmt.Fprintf(out, "INVALID: %v\n", err)
 	} else {
 		fmt.Fprintf(out, "Node ID: %v\n", n.ID())
-		dumpNodeURL(out, n)
 	}
 	kv := r.AppendElements(nil)[1:]
 	fmt.Fprintf(out, "Record has sequence number %d and %d key/value pairs.\n", r.Seq(), len(kv)/2)
 	fmt.Fprint(out, dumpRecordKV(kv, 2))
-}
-
-func dumpNodeURL(out io.Writer, n *enode.Node) {
-	var key enode.Secp256k1
-	if n.Load(&key) != nil {
-		return // no secp256k1 public key
-	}
-	fmt.Fprintf(out, "URLv4:   %s\n", n.URLv4())
+	return out.String()
 }
 
 func dumpRecordKV(kv []interface{}, indent int) string {

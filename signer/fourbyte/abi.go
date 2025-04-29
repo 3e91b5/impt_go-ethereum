@@ -1,4 +1,4 @@
-// Copyright 2019 The go-ethereum Authors
+// Copyright 2018 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -74,20 +75,47 @@ func verifySelector(selector string, calldata []byte) (*decodedCallData, error) 
 	return parseCallData(calldata, string(abidata))
 }
 
+// selectorRegexp is used to validate that a 4byte database selector corresponds
+// to a valid ABI function declaration.
+//
+// Note, although uppercase letters are not part of the ABI spec, this regexp
+// still accepts it as the general format is valid. It will be rejected later
+// by the type checker.
+var selectorRegexp = regexp.MustCompile(`^([^\)]+)\(([A-Za-z0-9,\[\]]*)\)`)
+
 // parseSelector converts a method selector into an ABI JSON spec. The returned
 // data is a valid JSON string which can be consumed by the standard abi package.
-func parseSelector(unescapedSelector string) ([]byte, error) {
-	selector, err := abi.ParseSelector(unescapedSelector)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse selector: %v", err)
+func parseSelector(selector string) ([]byte, error) {
+	// Define a tiny fake ABI struct for JSON marshalling
+	type fakeArg struct {
+		Type string `json:"type"`
 	}
+	type fakeABI struct {
+		Name   string    `json:"name"`
+		Type   string    `json:"type"`
+		Inputs []fakeArg `json:"inputs"`
+	}
+	// Validate the selector and extract it's components
+	groups := selectorRegexp.FindStringSubmatch(selector)
+	if len(groups) != 3 {
+		return nil, fmt.Errorf("invalid selector %s (%v matches)", selector, len(groups))
+	}
+	name := groups[1]
+	args := groups[2]
 
-	return json.Marshal([]abi.SelectorMarshaling{selector})
+	// Reassemble the fake ABI and constuct the JSON
+	arguments := make([]fakeArg, 0)
+	if len(args) > 0 {
+		for _, arg := range strings.Split(args, ",") {
+			arguments = append(arguments, fakeArg{arg})
+		}
+	}
+	return json.Marshal([]fakeABI{{name, "function", arguments}})
 }
 
 // parseCallData matches the provided call data against the ABI definition and
 // returns a struct containing the actual go-typed values.
-func parseCallData(calldata []byte, unescapedAbidata string) (*decodedCallData, error) {
+func parseCallData(calldata []byte, abidata string) (*decodedCallData, error) {
 	// Validate the call data that it has the 4byte prefix and the rest divisible by 32 bytes
 	if len(calldata) < 4 {
 		return nil, fmt.Errorf("invalid call data, incomplete method signature (%d bytes < 4)", len(calldata))
@@ -99,9 +127,9 @@ func parseCallData(calldata []byte, unescapedAbidata string) (*decodedCallData, 
 		return nil, fmt.Errorf("invalid call data; length should be a multiple of 32 bytes (was %d)", len(argdata))
 	}
 	// Validate the called method and upack the call data accordingly
-	abispec, err := abi.JSON(strings.NewReader(unescapedAbidata))
+	abispec, err := abi.JSON(strings.NewReader(abidata))
 	if err != nil {
-		return nil, fmt.Errorf("invalid method signature (%q): %v", unescapedAbidata, err)
+		return nil, fmt.Errorf("invalid method signature (%s): %v", abidata, err)
 	}
 	method, err := abispec.MethodById(sigdata)
 	if err != nil {
@@ -109,10 +137,10 @@ func parseCallData(calldata []byte, unescapedAbidata string) (*decodedCallData, 
 	}
 	values, err := method.Inputs.UnpackValues(argdata)
 	if err != nil {
-		return nil, fmt.Errorf("signature %q matches, but arguments mismatch: %v", method.String(), err)
+		return nil, err
 	}
 	// Everything valid, assemble the call infos for the signer
-	decoded := decodedCallData{signature: method.Sig, name: method.RawName}
+	decoded := decodedCallData{signature: method.Sig(), name: method.Name}
 	for i := 0; i < len(method.Inputs); i++ {
 		decoded.inputs = append(decoded.inputs, decodedArgument{
 			soltype: method.Inputs[i],
@@ -130,7 +158,7 @@ func parseCallData(calldata []byte, unescapedAbidata string) (*decodedCallData, 
 	if !bytes.Equal(encoded, argdata) {
 		was := common.Bytes2Hex(encoded)
 		exp := common.Bytes2Hex(argdata)
-		return nil, fmt.Errorf("WARNING: Supplied data is stuffed with extra data. \nWant %s\nHave %s\nfor method %v", exp, was, method.Sig)
+		return nil, fmt.Errorf("WARNING: Supplied data is stuffed with extra data. \nWant %s\nHave %s\nfor method %v", exp, was, method.Sig())
 	}
 	return &decoded, nil
 }

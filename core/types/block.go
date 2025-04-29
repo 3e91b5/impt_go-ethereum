@@ -23,16 +23,18 @@ import (
 	"io"
 	"math/big"
 	"reflect"
+	"sort"
 	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rlp"
+	"golang.org/x/crypto/sha3"
 )
 
 var (
-	EmptyRootHash  = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyRootHash  = DeriveSha(Transactions{})
 	EmptyUncleHash = rlpHash([]*Header(nil))
 )
 
@@ -63,14 +65,13 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("BlockNonce", input, n[:])
 }
 
-//go:generate go run github.com/fjl/gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
-//go:generate go run ../../rlp/rlpgen -type Header -out gen_header_rlp.go
+//go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
 
 // Header represents a block header in the Ethereum blockchain.
 type Header struct {
 	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required"`
 	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required"`
-	Coinbase    common.Address `json:"miner"`
+	Coinbase    common.Address `json:"miner"            gencodec:"required"`
 	Root        common.Hash    `json:"stateRoot"        gencodec:"required"`
 	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required"`
 	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required"`
@@ -83,15 +84,6 @@ type Header struct {
 	Extra       []byte         `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
-
-	// BaseFee was added by EIP-1559 and is ignored in legacy headers.
-	BaseFee *big.Int `json:"baseFeePerGas" rlp:"optional"`
-
-	/*
-		TODO (MariusVanDerWijden) Add this field once needed
-		// Random was added during the merge and contains the BeaconState randomness
-		Random common.Hash `json:"random" rlp:"optional"`
-	*/
 }
 
 // field type overrides for gencodec
@@ -102,7 +94,6 @@ type headerMarshaling struct {
 	GasUsed    hexutil.Uint64
 	Time       hexutil.Uint64
 	Extra      hexutil.Bytes
-	BaseFee    *hexutil.Big
 	Hash       common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
@@ -136,23 +127,14 @@ func (h *Header) SanityCheck() error {
 	if eLen := len(h.Extra); eLen > 100*1024 {
 		return fmt.Errorf("too large block extradata: size %d", eLen)
 	}
-	if h.BaseFee != nil {
-		if bfLen := h.BaseFee.BitLen(); bfLen > 256 {
-			return fmt.Errorf("too large base fee: bitlen %d", bfLen)
-		}
-	}
 	return nil
 }
 
-// EmptyBody returns true if there is no additional 'body' to complete the header
-// that is: no transactions and no uncles.
-func (h *Header) EmptyBody() bool {
-	return h.TxHash == EmptyRootHash && h.UncleHash == EmptyUncleHash
-}
-
-// EmptyReceipts returns true if there are no receipts for this header/block.
-func (h *Header) EmptyReceipts() bool {
-	return h.ReceiptHash == EmptyRootHash
+func rlpHash(x interface{}) (h common.Hash) {
+	hw := sha3.NewLegacyKeccak256()
+	rlp.Encode(hw, x)
+	hw.Sum(h[:0])
+	return h
 }
 
 // Body is a simple (mutable, non-safe) data container for storing and moving
@@ -160,6 +142,7 @@ func (h *Header) EmptyReceipts() bool {
 type Body struct {
 	Transactions []*Transaction
 	Uncles       []*Header
+	TrieNonces	 []uint64
 }
 
 // Block represents an entire block in the Ethereum blockchain.
@@ -167,10 +150,15 @@ type Block struct {
 	header       *Header
 	uncles       []*Header
 	transactions Transactions
+	trieNonces	 []uint64 // (sjkim)
 
 	// caches
 	hash atomic.Value
 	size atomic.Value
+
+	// Td is used by package core to store the total difficulty
+	// of the chain up to and including the block.
+	td *big.Int
 
 	// These fields are used by package eth to track
 	// inter-peer block relay.
@@ -178,11 +166,34 @@ type Block struct {
 	ReceivedFrom interface{}
 }
 
+// DeprecatedTd is an old relic for extracting the TD of a block. It is in the
+// code solely to facilitate upgrading the database from the old format to the
+// new, after which it should be deleted. Do not use!
+func (b *Block) DeprecatedTd() *big.Int {
+	return b.td
+}
+
+// [deprecated by eth/63]
+// StorageBlock defines the RLP encoding of a Block stored in the
+// state database. The StorageBlock encoding contains fields that
+// would otherwise need to be recomputed.
+type StorageBlock Block
+
 // "external" block encoding. used for eth protocol, etc.
 type extblock struct {
 	Header *Header
 	Txs    []*Transaction
 	Uncles []*Header
+	TrieNonces []uint64
+}
+
+// [deprecated by eth/63]
+// "storage" block encoding. used for database.
+type storageblock struct {
+	Header *Header
+	Txs    []*Transaction
+	Uncles []*Header
+	TD     *big.Int
 }
 
 // NewBlock creates a new block. The input data is copied,
@@ -192,14 +203,14 @@ type extblock struct {
 // The values of TxHash, UncleHash, ReceiptHash and Bloom in header
 // are ignored and set to values derived from the given txs, uncles
 // and receipts.
-func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*Receipt, hasher TrieHasher) *Block {
-	b := &Block{header: CopyHeader(header)}
+func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*Receipt) *Block {
+	b := &Block{header: CopyHeader(header), td: new(big.Int)}
 
 	// TODO: panic if len(txs) != len(receipts)
 	if len(txs) == 0 {
 		b.header.TxHash = EmptyRootHash
 	} else {
-		b.header.TxHash = DeriveSha(Transactions(txs), hasher)
+		b.header.TxHash = DeriveSha(Transactions(txs))
 		b.transactions = make(Transactions, len(txs))
 		copy(b.transactions, txs)
 	}
@@ -207,7 +218,7 @@ func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*
 	if len(receipts) == 0 {
 		b.header.ReceiptHash = EmptyRootHash
 	} else {
-		b.header.ReceiptHash = DeriveSha(Receipts(receipts), hasher)
+		b.header.ReceiptHash = DeriveSha(Receipts(receipts))
 		b.header.Bloom = CreateBloom(receipts)
 	}
 
@@ -241,9 +252,6 @@ func CopyHeader(h *Header) *Header {
 	if cpy.Number = new(big.Int); h.Number != nil {
 		cpy.Number.Set(h.Number)
 	}
-	if h.BaseFee != nil {
-		cpy.BaseFee = new(big.Int).Set(h.BaseFee)
-	}
 	if len(h.Extra) > 0 {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
@@ -258,7 +266,7 @@ func (b *Block) DecodeRLP(s *rlp.Stream) error {
 	if err := s.Decode(&eb); err != nil {
 		return err
 	}
-	b.header, b.uncles, b.transactions = eb.Header, eb.Uncles, eb.Txs
+	b.header, b.uncles, b.transactions, b.trieNonces = eb.Header, eb.Uncles, eb.Txs, eb.TrieNonces
 	b.size.Store(common.StorageSize(rlp.ListSize(size)))
 	return nil
 }
@@ -269,13 +277,25 @@ func (b *Block) EncodeRLP(w io.Writer) error {
 		Header: b.header,
 		Txs:    b.transactions,
 		Uncles: b.uncles,
+		TrieNonces: b.trieNonces,
 	})
+}
+
+// [deprecated by eth/63]
+func (b *StorageBlock) DecodeRLP(s *rlp.Stream) error {
+	var sb storageblock
+	if err := s.Decode(&sb); err != nil {
+		return err
+	}
+	b.header, b.uncles, b.transactions, b.td = sb.Header, sb.Uncles, sb.Txs, sb.TD
+	return nil
 }
 
 // TODO: copies
 
 func (b *Block) Uncles() []*Header          { return b.uncles }
 func (b *Block) Transactions() Transactions { return b.transactions }
+func (b *Block) TrieNonces() []uint64 { return b.trieNonces }
 
 func (b *Block) Transaction(hash common.Hash) *Transaction {
 	for _, transaction := range b.transactions {
@@ -304,20 +324,13 @@ func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
 func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Extra) }
 
-func (b *Block) BaseFee() *big.Int {
-	if b.header.BaseFee == nil {
-		return nil
-	}
-	return new(big.Int).Set(b.header.BaseFee)
-}
-
 func (b *Block) Header() *Header { return CopyHeader(b.header) }
 
 // Body returns the non-header content of the block.
-func (b *Block) Body() *Body { return &Body{b.transactions, b.uncles} }
+func (b *Block) Body() *Body { return &Body{b.transactions, b.uncles, b.trieNonces} }
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
-// and returning it, or returning a previously cached value.
+// and returning it, or returning a previsouly cached value.
 func (b *Block) Size() common.StorageSize {
 	if size := b.size.Load(); size != nil {
 		return size.(common.StorageSize)
@@ -357,17 +370,20 @@ func (b *Block) WithSeal(header *Header) *Block {
 		header:       &cpy,
 		transactions: b.transactions,
 		uncles:       b.uncles,
+		trieNonces:	  b.trieNonces,
 	}
 }
 
 // WithBody returns a new block with the given transaction and uncle contents.
-func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
+func (b *Block) WithBody(transactions []*Transaction, uncles []*Header, trieNonces []uint64) *Block {
 	block := &Block{
 		header:       CopyHeader(b.header),
 		transactions: make([]*Transaction, len(transactions)),
 		uncles:       make([]*Header, len(uncles)),
+		trieNonces:   make([]uint64, len(trieNonces)),
 	}
 	copy(block.transactions, transactions)
+	copy(block.trieNonces, trieNonces)
 	for i := range uncles {
 		block.uncles[i] = CopyHeader(uncles[i])
 	}
@@ -385,22 +401,40 @@ func (b *Block) Hash() common.Hash {
 	return v
 }
 
+// ModifyRoot is called after stateRoot is found after IMPT mining
+// Updates stateRoot field
+func (b *Block) ModifyRoot(hash common.Hash) {
+	b.header.Root = hash
+}
+
+// ModifyBody is called after stateRoot is found after IMPT mining
+// Updates trieNonces field
+func (b *Block) ModifyBody(trieNonces []uint64) {
+	b.trieNonces = make([]uint64, len(trieNonces))
+	copy(b.trieNonces, trieNonces)
+}
+
 type Blocks []*Block
 
-// HeaderParentHashFromRLP returns the parentHash of an RLP-encoded
-// header. If 'header' is invalid, the zero hash is returned.
-func HeaderParentHashFromRLP(header []byte) common.Hash {
-	// parentHash is the first list element.
-	listContent, _, err := rlp.SplitList(header)
-	if err != nil {
-		return common.Hash{}
+type BlockBy func(b1, b2 *Block) bool
+
+func (self BlockBy) Sort(blocks Blocks) {
+	bs := blockSorter{
+		blocks: blocks,
+		by:     self,
 	}
-	parentHash, _, err := rlp.SplitString(listContent)
-	if err != nil {
-		return common.Hash{}
-	}
-	if len(parentHash) != 32 {
-		return common.Hash{}
-	}
-	return common.BytesToHash(parentHash)
+	sort.Sort(bs)
 }
+
+type blockSorter struct {
+	blocks Blocks
+	by     func(b1, b2 *Block) bool
+}
+
+func (self blockSorter) Len() int { return len(self.blocks) }
+func (self blockSorter) Swap(i, j int) {
+	self.blocks[i], self.blocks[j] = self.blocks[j], self.blocks[i]
+}
+func (self blockSorter) Less(i, j int) bool { return self.by(self.blocks[i], self.blocks[j]) }
+
+func Number(b1, b2 *Block) bool { return b1.header.Number.Cmp(b2.header.Number) < 0 }

@@ -1,18 +1,19 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// This file is part of go-ethereum.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// go-ethereum is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// go-ethereum is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License
+// along with go-ethereum. If not, see <http://www.gnu.org/licenses/>.
+//
 
 package storage
 
@@ -22,6 +23,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"io"
+	"io/ioutil"
 	"os"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -113,7 +115,7 @@ func (s *AESEncryptedStorage) Del(key string) {
 // readEncryptedStorage reads the file with encrypted creds
 func (s *AESEncryptedStorage) readEncryptedStorage() (map[string]storedCredential, error) {
 	creds := make(map[string]storedCredential)
-	raw, err := os.ReadFile(s.filename)
+	raw, err := ioutil.ReadFile(s.filename)
 
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -135,7 +137,7 @@ func (s *AESEncryptedStorage) writeEncryptedStorage(creds map[string]storedCrede
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile(s.filename, raw, 0600); err != nil {
+	if err = ioutil.WriteFile(s.filename, raw, 0600); err != nil {
 		return err
 	}
 	return nil
@@ -143,18 +145,18 @@ func (s *AESEncryptedStorage) writeEncryptedStorage(creds map[string]storedCrede
 
 // encrypt encrypts plaintext with the given key, with additional data
 // The 'additionalData' is used to place the (plaintext) KV-store key into the V,
-// to prevent the possibility to alter a K, or swap two entries in the KV store with each other.
+// to prevent the possibility to alter a K, or swap two entries in the KV store with eachother.
 func encrypt(key []byte, plaintext []byte, additionalData []byte) ([]byte, []byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, nil, err
 	}
 	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, nil, err
-	}
 	nonce := make([]byte, aesgcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, nil, err
+	}
+	if err != nil {
 		return nil, nil, err
 	}
 	ciphertext := aesgcm.Seal(nil, nonce, plaintext, additionalData)

@@ -1,26 +1,26 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// This file is part of go-ethereum.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// go-ethereum is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// go-ethereum is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
-
+// You should have received a copy of the GNU General Public License
+// along with go-ethereum. If not, see <http://www.gnu.org/licenses/>.
+//
 package storage
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io/ioutil"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -38,19 +38,20 @@ func TestEncryption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("Ciphertext %x, nonce %x\n", c, iv)
+	fmt.Printf("Ciphertext %x, nonce %x\n", c, iv)
 
 	p, err := decrypt(key, iv, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("Plaintext %v\n", string(p))
+	fmt.Printf("Plaintext %v\n", string(p))
 	if !bytes.Equal(plaintext, p) {
 		t.Errorf("Failed: expected plaintext recovery, got %v expected %v", string(plaintext), string(p))
 	}
 }
 
 func TestFileStorage(t *testing.T) {
+
 	a := map[string]storedCredential{
 		"secret": {
 			Iv:         common.Hex2Bytes("cdb30036279601aeee60f16b"),
@@ -61,7 +62,10 @@ func TestFileStorage(t *testing.T) {
 			CipherText: common.Hex2Bytes("2df87baf86b5073ef1f03e3cc738de75b511400f5465bb0ddeacf47ae4dc267d"),
 		},
 	}
-	d := t.TempDir()
+	d, err := ioutil.TempDir("", "eth-encrypted-storage-test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	stored := &AESEncryptedStorage{
 		filename: fmt.Sprintf("%v/vault.json", d),
 		key:      []byte("AES256Key-32Characters1234567890"),
@@ -91,7 +95,10 @@ func TestFileStorage(t *testing.T) {
 func TestEnd2End(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(3), log.StreamHandler(colorable.NewColorableStderr(), log.TerminalFormat(true))))
 
-	d := t.TempDir()
+	d, err := ioutil.TempDir("", "eth-encrypted-storage-test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s1 := &AESEncryptedStorage{
 		filename: fmt.Sprintf("%v/vault.json", d),
@@ -113,7 +120,10 @@ func TestSwappedKeys(t *testing.T) {
 	// K1:V1, K2:V2 can be swapped into K1:V2, K2:V1
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(3), log.StreamHandler(colorable.NewColorableStderr(), log.TerminalFormat(true))))
 
-	d := t.TempDir()
+	d, err := ioutil.TempDir("", "eth-encrypted-storage-test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s1 := &AESEncryptedStorage{
 		filename: fmt.Sprintf("%v/vault.json", d),
@@ -124,7 +134,7 @@ func TestSwappedKeys(t *testing.T) {
 	// Now make a modified copy
 
 	creds := make(map[string]storedCredential)
-	raw, err := os.ReadFile(s1.filename)
+	raw, err := ioutil.ReadFile(s1.filename)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +149,7 @@ func TestSwappedKeys(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = os.WriteFile(s1.filename, raw, 0600); err != nil {
+		if err = ioutil.WriteFile(s1.filename, raw, 0600); err != nil {
 			t.Fatal(err)
 		}
 	}

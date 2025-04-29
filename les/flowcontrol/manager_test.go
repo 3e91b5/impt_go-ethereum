@@ -1,4 +1,4 @@
-// Copyright 2019 The go-ethereum Authors
+// Copyright 2018 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -104,6 +104,7 @@ func testConstantTotalCapacity(t *testing.T, nodeCount, maxCapacityNodes, random
 	if ratio < 0.98 || ratio > 1.02 {
 		t.Errorf("totalCost/totalCapacity/testLength ratio incorrect (expected: 1, got: %f)", ratio)
 	}
+
 }
 
 func (n *testNode) send(t *testing.T, now mclock.AbsTime) bool {
