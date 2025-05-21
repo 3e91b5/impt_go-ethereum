@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	// imptTrie "github.com/3e91b5/impt_go-ethereum/trie" // 사용자 정의 trie 패키지
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/console"
@@ -188,6 +189,20 @@ Use "ethereum dump 0" to dump the genesis block.`,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 	}
+	printTrieCommand = cli.Command{
+		Action:    utils.MigrateFlags(printTrie),
+		Name:      "printtrie",
+		Usage:     "Prints the state trie of the current head block",
+		ArgsUsage: " ",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+		},
+		Category: "BLOCKCHAIN COMMANDS",
+		Description: `
+The printtrie command loads the blockchain from the specified data directory
+and prints the state trie of the current head block.
+It reads the database directly and does not start a full node.`,
+	}
 )
 
 // initGenesis will initialise the given JSON format genesis file and writes it as
@@ -215,7 +230,7 @@ func initGenesis(ctx *cli.Context) error {
 	for _, name := range []string{"chaindata", "lightchaindata"} {
 		chaindb, err := stack.OpenDatabase(name, 0, 0, "")
 		// impt: open (memory / level) db for trie node when init geth (jmlee)
-		for i:=0;i<trie.GlobalTrieNodeDBLength;i++{
+		for i := 0; i < trie.GlobalTrieNodeDBLength; i++ {
 			trie.GlobalTrieNodeDB[i], _ = stack.OpenDatabase("indexedNodes/index"+strconv.Itoa(i), 0, 0, "")
 		}
 		if err != nil {
@@ -554,6 +569,51 @@ func inspect(ctx *cli.Context) error {
 	defer chainDb.Close()
 
 	return rawdb.InspectDatabase(chainDb)
+}
+
+// printTrie prints the state trie of the current head block.
+func printTrie(ctx *cli.Context) error {
+	node, _ := makeConfigNode(ctx)
+
+	chainDb := utils.MakeChainDatabase(ctx, node)
+
+	// if err != nil {
+	// 	return fmt.Errorf("failed to open chain database: %v", err)
+	// }
+	defer chainDb.Close()
+
+	headHeaderHash := rawdb.ReadHeadHeaderHash(chainDb)
+	if headHeaderHash == (common.Hash{}) {
+		return fmt.Errorf("failed to read head header hash. Is the database initialized and non-empty?")
+	}
+
+	headBlockNumber := rawdb.ReadHeaderNumber(chainDb, headHeaderHash)
+	if headBlockNumber == nil {
+		return fmt.Errorf("failed to read head block number for hash %s. Database might be corrupt", headHeaderHash.Hex())
+	}
+
+	headHeader := rawdb.ReadHeader(chainDb, headHeaderHash, *headBlockNumber)
+	if headHeader == nil {
+		return fmt.Errorf("failed to read head header for hash %s, number %d. Database might be corrupt", headHeaderHash.Hex(), *headBlockNumber)
+	}
+	stateRoot := headHeader.Root
+
+	log.Info("Attempting to print state trie", "blockNumber", *headBlockNumber, "blockHash", headHeaderHash, "stateRoot", stateRoot)
+
+	trieDB := trie.NewDatabase(chainDb)
+	stateTrie, err := trie.New(stateRoot, trieDB)
+	if err != nil {
+		return fmt.Errorf("failed to open trie at root %s: %v. Ensure the database is consistent", stateRoot.Hex(), err)
+	}
+
+	fmt.Println("---------------------------------------------------------------------------------")
+	fmt.Printf("State Trie for Block #%d (Hash: %s)\n", *headBlockNumber, headHeaderHash.Hex())
+	fmt.Printf("State Root: %s\n", stateRoot.Hex())
+	fmt.Println("---------------------------------------------------------------------------------")
+	stateTrie.Print()
+	fmt.Println("---------------------------------------------------------------------------------")
+
+	return nil
 }
 
 // hashish returns true for strings that look like hashes.

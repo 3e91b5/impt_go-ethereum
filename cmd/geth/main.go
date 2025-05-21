@@ -210,6 +210,7 @@ func init() {
 		removedbCommand,
 		dumpCommand,
 		inspectCommand,
+		printTrieCommand,
 		// See accountcmd.go:
 		accountCommand,
 		walletCommand,
