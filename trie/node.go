@@ -17,19 +17,19 @@
 package trie
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
-	"strings"
 	"math/big"
 	"reflect"
-	"encoding/binary"
-	"sync"
 	"runtime"
+	"strings"
+	"sync"
 	"time"
-	
+
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 var indices = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "[17]"}
@@ -38,7 +38,7 @@ type node interface {
 	fstring(string) string
 	infostring(string, *Database) string // print node details in human readable form (jmlee)
 	cache() (hashNode, bool)
-	setNonce(uint64) // set node's nonce (jmlee)
+	setNonce(uint64)  // set node's nonce (jmlee)
 	getNonce() uint64 // get node's nonce (jmlee)
 	size() common.StorageSize
 }
@@ -46,7 +46,7 @@ type node interface {
 type (
 	fullNode struct { // branch node
 		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
-		Nonce    uint64 // to change node's hash for impt mining (jmlee)
+		Nonce    uint64   // to change node's hash for impt mining (jmlee)
 		flags    nodeFlag
 	}
 	shortNode struct { // extension node or leaf node
@@ -82,7 +82,7 @@ func (n *fullNode) EncodeRLP(w io.Writer) error {
 }
 
 // EncodeRLP encodes a short node into the consensus RLP format.
-// This encoding reflects the nonce field 
+// This encoding reflects the nonce field
 func (n *shortNode) EncodeRLP(w io.Writer) error {
 	var nodes [3]node
 
@@ -108,15 +108,15 @@ func (n *shortNode) cache() (hashNode, bool) { return n.flags.hash, n.flags.dirt
 func (n hashNode) cache() (hashNode, bool)   { return nil, true }
 func (n valueNode) cache() (hashNode, bool)  { return nil, true }
 
-func (n *fullNode) setNonce(newNonce uint64) { n.Nonce =  newNonce; return } // should be set flags.hash to nil to be rehashed (jmlee)
-func (n *shortNode) setNonce(newNonce uint64) { n.Nonce =  newNonce; return }// should be set flags.hash to nil to be rehashed (jmlee)
+func (n *fullNode) setNonce(newNonce uint64)  { n.Nonce = newNonce; return } // should be set flags.hash to nil to be rehashed (jmlee)
+func (n *shortNode) setNonce(newNonce uint64) { n.Nonce = newNonce; return } // should be set flags.hash to nil to be rehashed (jmlee)
 func (n hashNode) setNonce(newNonce uint64)   { return }
 func (n valueNode) setNonce(newNonce uint64)  { return }
 
-func (n *fullNode) getNonce() uint64 { return n.Nonce }
+func (n *fullNode) getNonce() uint64  { return n.Nonce }
 func (n *shortNode) getNonce() uint64 { return n.Nonce }
-func (n hashNode) getNonce() uint64 { return 0 } // return meaningless value (jmlee)
-func (n valueNode) getNonce() uint64 { return 0 } // return meaningless value (jmlee)
+func (n hashNode) getNonce() uint64   { return 0 } // return meaningless value (jmlee)
+func (n valueNode) getNonce() uint64  { return 0 } // return meaningless value (jmlee)
 
 // Pretty printing.
 func (n *fullNode) String() string  { return n.fstring("") }
@@ -369,8 +369,7 @@ func TrieSize(db ethdb.KeyValueReader, buf []byte) uint64 {
 		size += childSize[i]
 	}
 	return size
-} 
-
+}
 
 func trieSizePartial(db ethdb.KeyValueReader, buf []byte, size *uint64, w *sync.WaitGroup) {
 	defer w.Done()
@@ -384,7 +383,7 @@ func trieSize(db ethdb.KeyValueReader, buf []byte) uint64 {
 	}
 	size := uint64(len(buf) + len(data))
 	node := mustDecodeNode(buf, data)
-	
+
 	switch n := node.(type) {
 	case *fullNode:
 		var hash []byte
@@ -430,14 +429,18 @@ func miningTime(db ethdb.KeyValueReader, buf []byte, blockNum uint64, threads in
 		for _, child := range &n.Children {
 			if child != nil {
 				hash, _ = child.(hashNode)
-				if validHash(hash, blockNum) { elapsedMiningTime += miningTime(db, hash, blockNum, threads); }
+				if validHash(hash, blockNum) {
+					elapsedMiningTime += miningTime(db, hash, blockNum, threads)
+				}
 			}
 		}
 	case *shortNode:
 		switch val := n.Val.(type) {
 		case hashNode:
 			//fmt.Println("hash")
-			if validHash(val, blockNum) { elapsedMiningTime += miningTime(db, val, blockNum, threads); }
+			if validHash(val, blockNum) {
+				elapsedMiningTime += miningTime(db, val, blockNum, threads)
+			}
 		default:
 		}
 	default:
@@ -459,7 +462,12 @@ func (n valueNode) infostring(ind string, db *Database) string {
 	// decode data into account & print account
 	var acc Account
 	rlp.DecodeBytes([]byte(n), &acc)
-	return fmt.Sprintf("[ Nonce: %d / Balance: %d ]", acc.Nonce, acc.Balance.Uint64())
+	if acc.Root == common.HexToHash("0x0") { // empty root
+		return fmt.Sprintf("[ Nonce: %d / Balance: %d ]", acc.Nonce, acc.Balance.Uint64())
+	} else if acc.Root == emptyRoot {
+		return fmt.Sprintf("[ Nonce: %d / Balance: %d ]", acc.Nonce, acc.Balance.Uint64())
+	}
+	return fmt.Sprintf("[ Nonce: %d / Balance: %d / StorageRoot: %x]", acc.Nonce, acc.Balance.Uint64(), acc.Root.Hex())
 }
 
 /*
@@ -467,14 +475,14 @@ func (n valueNode) infostring(ind string, db *Database) string {
 func rehash(n node) node {
 	if n == nil {
 		hash := hashNode(emptyRoot.Bytes())
-		//fmt.Println("rehashed hash:", common.BytesToHash(hash).Hex()) 
+		//fmt.Println("rehashed hash:", common.BytesToHash(hash).Hex())
 		return hash
 	}
 
 	h := newHasher(nil)
 	defer returnHasherToPool(h)
 	hash, _, _ := h.hash(n, nil, true)
-	//fmt.Println("rehashed hash:", common.BytesToHash(hash.(hashNode)).Hex()) 
+	//fmt.Println("rehashed hash:", common.BytesToHash(hash.(hashNode)).Hex())
 	return hash
 }
 */
