@@ -272,10 +272,11 @@ func (s *stateObject) updateRoot(db Database) {
 	//jhkim
 	updated_address := s.address
 	updated_storage := s.dirtyStorage
+
 	log.Debug("updateRoot", "address", updated_address)
 	log.Debug("    storage")
 	for k, v := range updated_storage {
-		log.Debug("        ", k, v)
+		log.Debug("        ", "key", k, "value", v)
 	}
 	s.updateTrie(db)
 
