@@ -99,7 +99,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 
 	//jhkim
 	// debug log for applytransaction
-	log.Debug("ApplyTransaction", "to", msg.To(), "data", msg.Data())
+	log.Debug("ApplyTransaction", "txhash", tx.Hash(), "to", msg.To(), "data", common.Bytes2Hex(msg.Data()))
 
 	// Apply the transaction to the current state (included in the env)
 	_, gas, failed, err := ApplyMessage(vmenv, msg, gp)
