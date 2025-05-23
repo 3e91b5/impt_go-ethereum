@@ -274,9 +274,9 @@ func (s *stateObject) updateRoot(db Database) {
 	updated_storage := s.dirtyStorage
 
 	log.Debug("updateRoot", "address", updated_address)
-	log.Debug("    storage")
+	// log.Debug("    storage")
 	for k, v := range updated_storage {
-		log.Debug("        ", "key", k, "value", v)
+		log.Debug("    storage update", "key", k, "value", v)
 	}
 	s.updateTrie(db)
 
