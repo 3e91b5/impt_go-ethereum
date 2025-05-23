@@ -25,6 +25,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 )
@@ -268,6 +269,14 @@ func (s *stateObject) updateTrie(db Database) Trie {
 
 // UpdateRoot sets the trie root to the current root hash of
 func (s *stateObject) updateRoot(db Database) {
+	//jhkim
+	updated_address := s.address
+	updated_storage := s.dirtyStorage
+	log.Debug("updateRoot", "address", updated_address)
+	log.Debug("    storage")
+	for k, v := range updated_storage {
+		log.Debug("        ", k, v)
+	}
 	s.updateTrie(db)
 
 	// Track the amount of time wasted on hashing the storge trie
