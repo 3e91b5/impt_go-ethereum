@@ -247,6 +247,7 @@ func (s *stateObject) updateTrie(db Database) Trie {
 	}
 	// Update all the dirty slots in the trie
 	tr := s.getTrie(db)
+	log.Debug("updateTrie", "address", s.address)
 	for key, value := range s.dirtyStorage {
 		delete(s.dirtyStorage, key)
 
@@ -262,6 +263,8 @@ func (s *stateObject) updateTrie(db Database) Trie {
 		}
 		// Encoding []byte cannot fail, ok to ignore the error.
 		v, _ := rlp.EncodeToBytes(bytes.TrimLeft(value[:], "\x00"))
+		//jhkim
+		log.Debug("    storage update in updateTrie", "key", key, "value", value)
 		s.setError(tr.TryUpdate(key[:], v))
 	}
 	return tr
