@@ -269,13 +269,20 @@ func (s *stateObject) updateTrie(db Database) Trie {
 	}
 	if s.address == common.HexToAddress("0x5A6E1EFA4F0E043a687A625d1e29E75C7c746017") {
 		fmt.Println("print storage trie in updateTrie")
-		fmt.Println(s.trie.Hash())
-		storageTrie, err := db.OpenStorageTrie(s.addrHash, s.trie.Hash())
-		if err != nil {
-			s.setError(fmt.Errorf("can't open storage trie: %v", err))
-			return tr
-		}
-		storageTrie.Print()
+		fmt.Println(tr.Hash().String())
+		tr.Print()
+
+		// fmt.Println("print storage trie in updateTrie")
+		// fmt.Println(s.trie.Hash().String())
+		// fmt.Println("address", s.address.String())
+		// fmt.Println("addrHash", s.addrHash.String())
+		// fmt.Println("s.trie.Hash()", s.trie.Hash().String())
+		// storageTrie, err := db.OpenStorageTrie(s.addrHash, s.trie.Hash())
+		// if err != nil {
+		// 	s.setError(fmt.Errorf("can't open storage trie: %v", err))
+		// 	return tr
+		// }
+		// storageTrie.Print()
 	}
 	return tr
 }
