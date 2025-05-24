@@ -27,7 +27,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/trie"
-	
 )
 
 func NewState(ctx context.Context, head *types.Header, odr OdrBackend) *state.StateDB {
@@ -134,7 +133,6 @@ func (t *odrTrie) Hash() common.Hash {
 	return t.trie.Hash()
 }
 
-
 func (t *odrTrie) HashWithNonce(blockNum uint64, threads int) (common.Hash, []uint64) {
 	if t.trie == nil {
 		return t.id.Root, nil
@@ -163,6 +161,16 @@ func (t *odrTrie) Prove(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter
 
 func (t *odrTrie) TrieSize() common.StorageSize {
 	return t.trie.TrieSize()
+}
+
+// jhkim
+func (t *odrTrie) Print() {
+	if t.trie.Hash() == common.HexToHash("0x0") {
+		fmt.Println("empty trie ( empty root hash:", t.Hash().Hex(), ")")
+		return
+	}
+
+	// fmt.Println(t.root.infostring("", t.db))
 }
 
 // do tries and retries to execute a function until it returns with no error or

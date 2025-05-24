@@ -78,10 +78,10 @@ type Trie interface {
 	// can be used even if the trie doesn't have one.
 	Hash() common.Hash
 
-	// HashWithNonce returns the root hash of the trie with the mining work result. 
+	// HashWithNonce returns the root hash of the trie with the mining work result.
 	// It does not write to the database and can be used even if the trie doesn't have one.
 	HashWithNonce(uint64, int) (common.Hash, []uint64)
-	
+
 	// HashByNonce returns the root hash of the trie updated by previously mined work.
 	// It does not write to the database and can be used even if the trie doesn't have one.
 	HashByNonce(trieNonces []uint64, blockNum uint64) common.Hash
@@ -105,6 +105,8 @@ type Trie interface {
 
 	// TrieSize returns the total node size in the state trie (sjkim)
 	TrieSize() common.StorageSize
+	// Print prints the trie structure to stdout.
+	Print()
 }
 
 // NewDatabase creates a backing store for state. The returned database is safe for

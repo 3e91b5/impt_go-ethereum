@@ -161,7 +161,6 @@ func (t *SecureTrie) Hash() common.Hash {
 	return t.trie.Hash()
 }
 
-
 func (t *SecureTrie) HashWithNonce(blockNum uint64, threads int) (common.Hash, []uint64) {
 	return t.trie.HashWithNonce(blockNum, threads)
 }
@@ -216,4 +215,13 @@ func NewEmptySecure() *SecureTrie {
 
 func (t *SecureTrie) Trie() *Trie {
 	return &t.trie
+}
+
+func (t *SecureTrie) Print() {
+	if t.trie.root == nil {
+		fmt.Println("empty trie ( empty root hash:", t.Hash().Hex(), ")")
+		return
+	}
+
+	fmt.Println(t.trie.root.infostring("", t.trie.db))
 }
