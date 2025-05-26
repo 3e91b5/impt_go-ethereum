@@ -640,7 +640,7 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 
 	//jhkim
 	// debug log for sstore
-	log.Debug("opSload", "address", contract.self.Address(), "loc", loc, "val", val)
+	log.Debug("opSload", "address", contract.self.Address(), "loc", common.BigToHash(loc), "val", val)
 	loc.SetBytes(val.Bytes())
 	return nil, nil
 }
