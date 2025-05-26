@@ -462,7 +462,7 @@ func (n valueNode) infostring(ind string, db *Database) string {
 	// decode data into account & print account
 	var acc Account
 	err := rlp.DecodeBytes([]byte(n), &acc)
-	if err != nil { // state trie
+	if err == nil { // state trie
 		if acc.Root == common.HexToHash("0x0") { // empty root
 			return fmt.Sprintf("[ Nonce: %d / Balance: %d ]", acc.Nonce, acc.Balance.Uint64())
 		} else if acc.Root == emptyRoot {
