@@ -282,6 +282,19 @@ func (self *StateDB) GetCodeHash(addr common.Address) common.Hash {
 func (self *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
+		if stateObject.address == common.HexToAddress("0x5A6E1EFA4F0E043a687A625d1e29E75C7c746017") {}
+			fmt.Println("GetState", "addr", addr.Hex(), "hash", hash.Hex())
+			fmt.Println("    dirty storage:")
+			for k, v := range stateObject.dirtyStorage {
+				fmt.Printf("        %s: %s\n", k.Hex(), v.Hex())
+			}
+			//committed
+			fmt.Println("    committed:")
+			for k, v := range stateObject.committedStorage {
+				fmt.Printf("        %s: %s\n", k.Hex(), v.Hex())
+			}
+
+		}
 		return stateObject.GetState(self.db, hash)
 	}
 	return common.Hash{}
@@ -504,8 +517,8 @@ func (self *StateDB) createObject(addr common.Address) (newobj, prev *stateObjec
 // CreateAccount is called during the EVM CREATE operation. The situation might arise that
 // a contract does the following:
 //
-//   1. sends funds to sha(account ++ (nonce + 1))
-//   2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
+//  1. sends funds to sha(account ++ (nonce + 1))
+//  2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (self *StateDB) CreateAccount(addr common.Address) {
