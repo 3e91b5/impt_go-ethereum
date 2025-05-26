@@ -270,8 +270,8 @@ func (s *stateObject) updateTrie(db Database) Trie {
 	if s.address == common.HexToAddress("0x5A6E1EFA4F0E043a687A625d1e29E75C7c746017") {
 		fmt.Println("print storage trie in updateTrie")
 		fmt.Println(tr.Hash().String())
-		tr.PrintTrieWithIterator()
-		// tr.Print()
+		// tr.PrintTrieWithIterator()
+		tr.Print()
 
 		// fmt.Println("print storage trie in updateTrie")
 		// fmt.Println(s.trie.Hash().String())
