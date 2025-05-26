@@ -172,6 +172,12 @@ func (t *odrTrie) Print() {
 
 	// fmt.Println(t.root.infostring("", t.db))
 }
+func (t *odrTrie) PrintTrieWithIterator() {
+	if t.trie.Hash() == common.HexToHash("0x0") {
+		fmt.Println("empty trie ( empty root hash:", t.Hash().Hex(), ")")
+		return
+	}
+}
 
 // do tries and retries to execute a function until it returns with no error or
 // an error type other than MissingNodeError

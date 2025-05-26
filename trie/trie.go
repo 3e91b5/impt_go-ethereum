@@ -20,7 +20,7 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
@@ -420,7 +420,7 @@ func (t *Trie) HashWithNonce(blockNum uint64, threads int) (common.Hash, []uint6
 	return common.BytesToHash(hash.(hashNode)), trieNonces
 }
 
-// HashByNonce returns the root hash of the indexed MPT which node is indexed by the trieNonces field in the block body. 
+// HashByNonce returns the root hash of the indexed MPT which node is indexed by the trieNonces field in the block body.
 // It modifies each state trie node of locals to the indexed one by miner.
 // It does not write to the database and can be used even if the trie doesn't have one.
 func (t *Trie) HashByNonce(trieNonces []uint64, blockNum uint64) common.Hash {
@@ -463,7 +463,7 @@ func (t *Trie) TrieSize() common.StorageSize {
 	return t.root.size()
 }
 
-func (t *Trie) DB() *Database{
+func (t *Trie) DB() *Database {
 	return t.db
 }
 
@@ -479,19 +479,44 @@ func NewEmpty() *Trie {
 }
 
 // print trie nodes details in human readable form (jmlee)
-// func (t *Trie) Print() {
-// 	fmt.Println(t.root.fstring(""))
-// }
+//
+//	func (t *Trie) Print() {
+//		fmt.Println(t.root.fstring(""))
+//	}
 func (t *Trie) Print() {
 	if t.root == nil {
 		fmt.Println("empty trie ( empty root hash:", t.Hash().Hex(), ")")
 		return
-	} 
+	}
 
 	fmt.Println(t.root.infostring("", t.db))
 }
 
-func (t *Trie) SetRootNonce(newNonce uint64){
+// jhkim
+func (t *Trie) PrintTrieWithIterator() {
+	if t.root == nil {
+		fmt.Println("empty trie ( empty root hash:", t.Hash().Hex(), ")")
+		return
+	}
+
+	it := t.NodeIterator(nil)
+
+	for it.Next(true) {
+
+		fmt.Println(it.Hash())
+		if it.Leaf() {
+			fmt.Println("Leaf:", it.Leaf())
+		} else {
+			fmt.Println("Node:", t.root.fstring(""))
+
+		}
+	}
+	if err := it.Error(); err != nil {
+		fmt.Println("Error during iteration:", err)
+	}
+}
+
+func (t *Trie) SetRootNonce(newNonce uint64) {
 	if t.root == nil {
 		fmt.Println("Error: cannot set nil root node's nonce")
 		return
@@ -500,7 +525,7 @@ func (t *Trie) SetRootNonce(newNonce uint64){
 	t.root.setNonce(newNonce)
 }
 
-func (t *Trie) GetNodeCache(){
+func (t *Trie) GetNodeCache() {
 	if t.root == nil {
 		fmt.Println("Error: cannot print nil root node's cache")
 		return
@@ -516,9 +541,9 @@ func _nonceMatched(n node, hash []byte) bool {
 	case *shortNode:
 		//return true // fast mining
 		keyHashPrefix := compactToHashPrefix(n.Key)
-		//fmt.Println("key:", key, "\n") 	
-		//fmt.Println("keyHashPrefix:", keyHashPrefix, "\n") 
-		//fmt.Println("hash:", hash[:len(keyHashPrefix)], "\n") 
+		//fmt.Println("key:", key, "\n")
+		//fmt.Println("keyHashPrefix:", keyHashPrefix, "\n")
+		//fmt.Println("hash:", hash[:len(keyHashPrefix)], "\n")
 		return bytes.Equal(hash[:len(keyHashPrefix)], keyHashPrefix)
 	case *fullNode:
 		numOfChildren := 0
@@ -536,8 +561,8 @@ func _nonceMatched(n node, hash []byte) bool {
 		buf := make([]byte, 2)
 		buf[0] = byte(numOfChildren%16)
 		buf[1] = byte(tmp[0]) << 4
-		buf[1] |= byte(tmp[1]) 
-		
+		buf[1] |= byte(tmp[1])
+
 		return bytes.Equal(hash[:2], buf)
 	default:
 		return false

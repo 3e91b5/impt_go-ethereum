@@ -107,6 +107,7 @@ type Trie interface {
 	TrieSize() common.StorageSize
 	// Print prints the trie structure to stdout.
 	Print()
+	PrintTrieWithIterator()
 }
 
 // NewDatabase creates a backing store for state. The returned database is safe for

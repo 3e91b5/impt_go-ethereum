@@ -100,6 +100,9 @@ type NodeIterator interface {
 	// iterator is not positioned at a leaf. Callers must not retain references
 	// to the value after calling Next.
 	LeafProof() [][]byte
+
+	//jhkim
+	Node() node // Returns the current node being iterated
 }
 
 // nodeIteratorState represents the iteration state at one particular node of the
@@ -139,6 +142,14 @@ func newNodeIterator(trie *Trie, start []byte) NodeIterator {
 	it := &nodeIterator{trie: trie}
 	it.err = it.seek(start)
 	return it
+}
+
+// jhkim
+func (it *nodeIterator) Node() node {
+	if len(it.stack) == 0 {
+		return nil
+	}
+	return it.stack[len(it.stack)-1].node
 }
 
 func (it *nodeIterator) Hash() common.Hash {
@@ -420,6 +431,11 @@ func (it *differenceIterator) Path() []byte {
 	return it.b.Path()
 }
 
+// jhkim
+func (it *differenceIterator) Node() node {
+	return it.b.Node()
+}
+
 func (it *differenceIterator) Next(bool) bool {
 	// Invariants:
 	// - We always advance at least one element in b.
@@ -525,6 +541,11 @@ func (it *unionIterator) LeafProof() [][]byte {
 
 func (it *unionIterator) Path() []byte {
 	return (*it.items)[0].Path()
+}
+
+// jhkim
+func (it *unionIterator) Node() node {
+	return (*it.items)[0].Node()
 }
 
 // Next returns the next node in the union of tries being iterated over.

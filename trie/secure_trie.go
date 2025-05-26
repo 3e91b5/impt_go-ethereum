@@ -225,3 +225,25 @@ func (t *SecureTrie) Print() {
 
 	fmt.Println(t.trie.root.infostring("", t.trie.db))
 }
+
+func (t *SecureTrie) PrintTrieWithIterator() {
+	if t.trie.root == nil {
+		fmt.Println("empty trie ( empty root hash:", t.Hash().Hex(), ")")
+		return
+	}
+
+	it := t.trie.NodeIterator(nil)
+
+	for it.Next(true) {
+		// node := it.
+		// node := it.Node()
+		// key := it.Key()
+		// value := it.Value()
+		// it.Node().fstring("  ")
+		it.Node().infostring("  ", t.trie.db)
+		// fmt.Printf("Key: %s, Value: %s\n", common.Bytes2Hex(node.Key), common.Bytes2Hex(node.Value))
+	}
+	if err := it.Error(); err != nil {
+		fmt.Println("Error during iteration:", err)
+	}
+}
